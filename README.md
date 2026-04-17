@@ -1,5 +1,10 @@
 # Sistema inteligente de reconocimiento de matrículas (ANPR v2.0)
 
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)]()
+[![OpenCV](https://img.shields.io/badge/OpenCV-4.8-5C3EE8?style=flat-square&logo=opencv&logoColor=white)]()
+[![Streamlit](https://img.shields.io/badge/Streamlit-Cloud-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)]()
+[![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-00FFFF?style=flat-square&logo=yolo&logoColor=black)]()
+
 Este proyecto desarrolla un sistema completo de lectura de matrículas diseñado como un producto de datos funcional. El objetivo no es solo ejecutar un modelo de detección, sino orquestar una arquitectura multi-modelo capaz de resolver retos reales como la variabilidad de iluminación, los ángulos complejos en parkings y el procesamiento de vídeo en tiempo real.
 
 ## El origen del proyecto
@@ -33,23 +38,17 @@ En el benchmark de evaluación con imágenes reales de parking, el sistema ha de
 
 Para transformar este experimento académico en una herramienta accesible, he desplegado una aplicación web profesional utilizando Streamlit. La interfaz sigue una línea de diseño limpia y cuenta con una infraestructura de monitorización externa para garantizar disponibilidad permanente, evitando la hibernación de los servidores.
 
-## Tecnologías utilizadas
-
-* **Detección espacial:** Ultralytics YOLOv8
-* **Procesamiento visual:** OpenCV
-* **Motor de lectura:** EasyOCR (CNN + RNN)
-* **Seguimiento:** ByteTrack
-* **Interfaz y nube:** Streamlit Cloud y GitHub
-
 ---
 
 ## Sobre la autora
 
-Soy María Luisa Ros Bolea, graduada en Comunicación Digital y finalizando mi Máster en Big Data e Inteligencia Artificial en la Universidad CEU San Pablo. Combino mi experiencia técnica en Python y SQL con mi perfil de Marketing & Communications Manager para traducir los aspectos técnicos de los datos en estrategias digitales ejecutables. 
+Soy María Luisa Ros Bolea, graduada en Comunicación Digital y finalizando mi Máster en Big Data e Inteligencia Artificial en la Universidad CEU San Pablo de Madrid. Combino mi experiencia técnica en Python y SQL con mi perfil estratégico para traducir la complejidad técnica de los datos en planes de negocio y soluciones visuales ejecutables.
 
-Puedes conocer más sobre mi trabajo o contactar conmigo a través de mis perfiles:
+<div align="center">
+  
+  [![Portfolio](https://img.shields.io/badge/Portfolio_Digital-1f425f?style=for-the-badge&logo=mac-os&logoColor=white)](https://malurosbolea-ux.github.io/digital-strategy-portfolio/)
+  [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mar%C3%ADa-luisa-ros-bolea-400780160/)
+  [![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://www.instagram.com/malu_menolu/)
+  [![Email](https://img.shields.io/badge/Email_Contacto-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:malurosbolea@gmail.com)
 
-* **Portfolio web:** [malurosbolea-ux.github.io/digital-strategy-portfolio](https://malurosbolea-ux.github.io/digital-strategy-portfolio/)
-* **LinkedIn:** [María Luisa Ros Bolea](https://www.linkedin.com/in/mar%C3%ADa-luisa-ros-bolea-400780160/)
-* **Instagram:** [@malu_menolu](https://www.instagram.com/malu_menolu/)
-* **Email:** [malurosbolea@gmail.com](mailto:malurosbolea@gmail.com)
+</div>
