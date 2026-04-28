@@ -4,7 +4,6 @@ import numpy as np
 import easyocr
 from ultralytics import YOLO
 import re
-from PIL import Image
 import time
 
 # 1. Configuracion base de la pagina
@@ -156,6 +155,7 @@ def preprocess_plate_region(plate_img):
 
     return results
 
+
 def ocr_on_versions(versions, reader):
     """
     Ejecuta OCR sobre multiples versiones preprocesadas y devuelve
@@ -179,6 +179,7 @@ def ocr_on_versions(versions, reader):
             continue
 
     return best_text, best_conf
+
 
 def process_frame(img_np):
     """
@@ -275,17 +276,15 @@ with col_input:
     uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
 
     if uploaded_file is not None:
-        # 1. Abro la imagen en formato PIL y limpio todo pasándola a RGB
-        imagen_pil = Image.open(uploaded_file).convert('RGB')
+        # 1. Leemos los bytes puros del tirón. Cero conversiones raras de Numpy para que no pete.
+        image_bytes = uploaded_file.read()
         
-        # 2. La convierto directamente a matriz (array de Numpy)
-        img_array_rgb = np.array(imagen_pil)
+        # 2. Le pasamos los bytes crudos directamente a Streamlit. ¡Cero intermediarios!
+        st.image(image_bytes, use_container_width=True, caption="Archivo cargado en memoria")
 
-        # 3. Le paso LA MATRIZ a Streamlit. ¡Se acabaron los TypeError!
-        st.image(img_array_rgb, use_container_width=True, caption="Archivo cargado en memoria")
-
-        # 4. La preparo en formato BGR para pasársela a OpenCV y a YOLO más abajo
-        img_bgr = cv2.cvtColor(img_array_rgb, cv2.COLOR_RGB2BGR)
+        # 3. Transformamos los bytes a la matriz BGR que necesita OpenCV
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         run_button = st.button("Iniciar secuencia de analisis")
 
@@ -309,14 +308,17 @@ with col_output:
             status_text.text("Ejecutando lectura mediante redes neuronales recurrentes...")
             progress_bar.progress(85)
 
-            # Uso el pipeline con la imagen BGR (que OpenCV procesa sin problema)
+            # 4. Procesamos con OpenCV tranquilamente
             res_img_bgr, plate, success = process_frame(img_bgr)
             progress_bar.progress(100)
             status_text.empty()
 
-            # Convierto la imagen final a RGB para mostrarla correctamente en pantalla
-            res_img_rgb_final = cv2.cvtColor(res_img_bgr, cv2.COLOR_BGR2RGB)
-            st.image(res_img_rgb_final, use_container_width=True, caption="Capa de deteccion y segmentacion")
+            # 5. PASO CRITICO: Convertimos el resultado de OpenCV a bytes de JPEG.
+            # ¡Así Streamlit no toca la matriz Numpy y no nos da el maldito TypeError!
+            _, buffer = cv2.imencode('.jpg', res_img_bgr)
+            res_bytes = buffer.tobytes()
+            
+            st.image(res_bytes, use_container_width=True, caption="Capa de deteccion y segmentacion")
 
             if success:
                 st.success(f"Lectura confirmada: **{plate}**")
