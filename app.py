@@ -4,7 +4,6 @@ import numpy as np
 import easyocr
 from ultralytics import YOLO
 import re
-from PIL import Image
 import time
 
 # 1. Configuracion base de la pagina
@@ -206,7 +205,6 @@ def process_frame(img_np):
             vh, vw = vehicle_roi.shape[:2]
 
             # Estrategia 1: zona inferior del vehiculo (donde suelen estar las matriculas)
-            # Recorto el tercio inferior y aplico preprocesamiento completo
             bottom_crop = vehicle_roi[int(vh * 0.5):, :]
             if bottom_crop.size > 0:
                 versions = preprocess_plate_region(bottom_crop)
@@ -278,10 +276,16 @@ with col_input:
     uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
 
     if uploaded_file is not None:
-        # Aquí está la magia: convierto la imagen a RGB pase lo que pase
-        image = Image.open(uploaded_file).convert('RGB')
-        img_array = np.array(image)
-        st.image(image, use_container_width=True, caption="Archivo cargado en memoria")
+        # PASO CLAVE: Leemos los bytes puros y usamos OpenCV para decodificar. 
+        # El parámetro '1' fuerza a cargarla en BGR con 3 canales, eliminando transparencias.
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        img_bgr = cv2.imdecode(file_bytes, 1) 
+        
+        # Convertimos una copia a RGB solo para que Streamlit pinte bien los colores
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        
+        # Le pasamos la matriz de números a Streamlit. ¡Cero errores!
+        st.image(img_rgb, use_container_width=True, caption="Archivo cargado en memoria")
 
         run_button = st.button("Iniciar secuencia de analisis")
 
@@ -305,11 +309,14 @@ with col_output:
             status_text.text("Ejecutando lectura mediante redes neuronales recurrentes...")
             progress_bar.progress(85)
 
-            res_img, plate, success = process_frame(img_array)
+            # Le pasamos a nuestra función la imagen en BGR, que es lo que espera OpenCV
+            res_img, plate, success = process_frame(img_bgr)
             progress_bar.progress(100)
             status_text.empty()
-
-            st.image(res_img, use_container_width=True, caption="Capa de deteccion y segmentacion")
+            
+            # La imagen resultante de process_frame viene en BGR, la pasamos a RGB para mostrarla
+            res_img_rgb = cv2.cvtColor(res_img, cv2.COLOR_BGR2RGB)
+            st.image(res_img_rgb, use_container_width=True, caption="Capa de deteccion y segmentacion")
 
             if success:
                 st.success(f"Lectura confirmada: **{plate}**")
