@@ -9,8 +9,8 @@ import time
 
 # 1. Configuracion base de la pagina
 st.set_page_config(
-    page_title="Plataforma de reconocimiento visual", 
-    layout="wide", 
+    page_title="Plataforma de reconocimiento visual",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
@@ -20,7 +20,7 @@ st.markdown("""
     .stApp {
         background-color: #F8F9FA;
     }
-    
+
     .main-banner {
         background: linear-gradient(135deg, #B5D8EB 0%, #F8D1E0 100%);
         padding: 3rem 2rem;
@@ -44,7 +44,7 @@ st.markdown("""
         font-weight: 400;
         margin-bottom: 0;
     }
-    
+
     .stButton>button {
         background: linear-gradient(90deg, #B5D8EB, #A3CDE3);
         color: #1A252F;
@@ -61,7 +61,7 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 5px 15px rgba(248, 209, 224, 0.4);
     }
-    
+
     .css-1r6slb0, .css-12oz5g7 {
         background-color: #FFFFFF;
         border-radius: 15px;
@@ -69,12 +69,12 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.02);
         border: 1px solid #F1F3F5;
     }
-    
+
     h2, h3 {
         color: #34495E !important;
         font-weight: 600;
     }
-    
+
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     </style>
@@ -100,7 +100,7 @@ with st.sidebar:
     st.markdown("#### Filtros activos")
     st.info("Filtrado alfanumerico: Activado")
     st.info("Supresion de ruido: Activado")
-    
+
     with st.spinner("Iniciando motores de IA..."):
         model_vehicles, reader = load_vision_models()
         VEHICLE_CLASSES = [2, 3, 5, 7]
@@ -109,37 +109,153 @@ def clean_plate_text(text):
     text = re.sub(r"[^A-Za-z0-9]", "", text)
     return text.upper()
 
+def preprocess_plate_region(plate_img):
+    """
+    Genera multiples versiones preprocesadas de la zona de matricula.
+    Cada version optimiza para un tipo de condicion de imagen diferente.
+    """
+    results = []
+
+    # Redimensionar a ancho estandar para que OCR trabaje mejor
+    target_width = 400
+    h, w = plate_img.shape[:2]
+    if w > 0 and h > 0:
+        scale = target_width / w
+        plate_img = cv2.resize(plate_img, (target_width, int(h * scale)),
+                               interpolation=cv2.INTER_CUBIC)
+
+    gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
+
+    # Version 1: CLAHE (contraste adaptativo local)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    results.append(enhanced)
+
+    # Version 2: CLAHE + binarizacion adaptativa (buena con iluminacion desigual)
+    binary = cv2.adaptiveThreshold(enhanced, 255,
+                                   cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY, 11, 2)
+    results.append(binary)
+
+    # Version 3: Denoising + Otsu
+    denoised = cv2.fastNlMeansDenoising(gray, h=10)
+    _, otsu = cv2.threshold(denoised, 0, 255,
+                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    results.append(otsu)
+
+    # Version 4: Sharpening
+    kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+    sharpened = cv2.filter2D(gray, -1, kernel)
+    results.append(sharpened)
+
+    # Version 5: CLAHE agresivo + denoising (para imagenes oscuras)
+    clahe_strong = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4, 4))
+    strong = clahe_strong.apply(gray)
+    strong_denoised = cv2.fastNlMeansDenoising(strong, h=12)
+    results.append(strong_denoised)
+
+    return results
+
+
+def ocr_on_versions(versions, reader):
+    """
+    Ejecuta OCR sobre multiples versiones preprocesadas y devuelve
+    el mejor resultado (mayor confianza con al menos 4 caracteres).
+    """
+    best_text = ""
+    best_conf = 0.0
+
+    for img in versions:
+        try:
+            ocr_results = reader.readtext(
+                img, detail=1, paragraph=False,
+                allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+            )
+            for (_, text, conf) in ocr_results:
+                cleaned = clean_plate_text(text)
+                if len(cleaned) >= 4 and conf > best_conf:
+                    best_text = cleaned
+                    best_conf = conf
+        except Exception:
+            continue
+
+    return best_text, best_conf
+
+
 def process_frame(img_np):
+    """
+    Pipeline completo: detecta vehiculos, recorta zonas de matricula,
+    aplica multiples preprocesados y extrae texto con OCR.
+    """
     results = model_vehicles(img_np, conf=0.25, verbose=False)
-    plate_text = "Matricula ilegible"
-    found = False
-    
+    best_plate = ""
+    best_conf = 0.0
+    best_box = None
+
     for result in results:
         for box in result.boxes:
-            if int(box.cls[0]) in VEHICLE_CLASSES:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                roi = img_np[y1:y2, x1:x2]
-                
-                if roi.size == 0: continue
-                
-                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                enhanced = cv2.createCLAHE(clipLimit=2.0).apply(gray)
-                
-                ocr_results = reader.readtext(enhanced)
-                for (_, text, conf) in ocr_results:
-                    cleaned = clean_plate_text(text)
-                    if len(cleaned) >= 4:
-                        plate_text = cleaned
-                        cv2.rectangle(img_np, (x1, y1), (x2, y2), (181, 216, 235), 4)
-                        
-                        (tw, th), _ = cv2.getTextSize(plate_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
-                        cv2.rectangle(img_np, (x1, y1 - th - 10), (x1 + tw, y1), (0, 0, 0), -1)
-                        cv2.putText(img_np, plate_text, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (248, 209, 224), 3)
-                        found = True
-                        break
-            if found: break
-        if found: break
-                        
+            if int(box.cls[0]) not in VEHICLE_CLASSES:
+                continue
+
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            vehicle_roi = img_np[y1:y2, x1:x2]
+
+            if vehicle_roi.size == 0:
+                continue
+
+            vh, vw = vehicle_roi.shape[:2]
+
+            # Estrategia 1: zona inferior del vehiculo (donde suelen estar las matriculas)
+            # Recorto el tercio inferior y aplico preprocesamiento completo
+            bottom_crop = vehicle_roi[int(vh * 0.5):, :]
+            if bottom_crop.size > 0:
+                versions = preprocess_plate_region(bottom_crop)
+                text, conf = ocr_on_versions(versions, reader)
+                if conf > best_conf and len(text) >= 4:
+                    best_plate = text
+                    best_conf = conf
+                    best_box = (x1, y1, x2, y2)
+
+            # Estrategia 2: zona inferior-central (mas centrada en la placa)
+            center_x = vw // 2
+            margin_x = int(vw * 0.35)
+            center_crop = vehicle_roi[int(vh * 0.55):,
+                                      max(0, center_x - margin_x):min(vw, center_x + margin_x)]
+            if center_crop.size > 0:
+                versions = preprocess_plate_region(center_crop)
+                text, conf = ocr_on_versions(versions, reader)
+                if conf > best_conf and len(text) >= 4:
+                    best_plate = text
+                    best_conf = conf
+                    best_box = (x1, y1, x2, y2)
+
+            # Estrategia 3: vehiculo completo como fallback
+            versions = preprocess_plate_region(vehicle_roi)
+            text, conf = ocr_on_versions(versions, reader)
+            if conf > best_conf and len(text) >= 4:
+                best_plate = text
+                best_conf = conf
+                best_box = (x1, y1, x2, y2)
+
+    # Estrategia 4: si no detecta vehiculos, OCR directo sobre imagen completa
+    if not best_plate:
+        versions = preprocess_plate_region(img_np)
+        text, conf = ocr_on_versions(versions, reader)
+        if len(text) >= 4:
+            best_plate = text
+            best_conf = conf
+
+    # Dibujar resultado en la imagen
+    found = len(best_plate) >= 4
+    if found and best_box is not None:
+        bx1, by1, bx2, by2 = best_box
+        cv2.rectangle(img_np, (bx1, by1), (bx2, by2), (181, 216, 235), 4)
+        (tw, th), _ = cv2.getTextSize(best_plate, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
+        cv2.rectangle(img_np, (bx1, by1 - th - 10), (bx1 + tw, by1), (0, 0, 0), -1)
+        cv2.putText(img_np, best_plate, (bx1, by1 - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (248, 209, 224), 3)
+
+    plate_text = best_plate if found else "Matricula ilegible"
     return img_np, plate_text, found
 
 # 4. Estructura principal de la interfaz
@@ -160,12 +276,12 @@ with col_input:
     st.markdown("### Modulo de ingesta de datos")
     st.markdown("Seleccione el archivo visual en formato estandar para iniciar la secuencia de extraccion.")
     uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
-    
+
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
         img_array = np.array(image)
-        st.image(image, use_column_width=True, caption="Archivo cargado en memoria")
-        
+        st.image(image, use_container_width=True, caption="Archivo cargado en memoria")
+
         run_button = st.button("Iniciar secuencia de analisis")
 
 with col_output:
@@ -176,24 +292,24 @@ with col_output:
         if run_button:
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
+
             status_text.text("Aislando vehiculo en el entorno...")
             progress_bar.progress(30)
             time.sleep(0.3)
-            
+
             status_text.text("Aplicando filtros de alto contraste y CLAHE...")
             progress_bar.progress(60)
             time.sleep(0.3)
-            
+
             status_text.text("Ejecutando lectura mediante redes neuronales recurrentes...")
             progress_bar.progress(85)
-            
+
             res_img, plate, success = process_frame(img_array)
             progress_bar.progress(100)
             status_text.empty()
-            
-            st.image(res_img, use_column_width=True, caption="Capa de deteccion y segmentacion")
-            
+
+            st.image(res_img, use_container_width=True, caption="Capa de deteccion y segmentacion")
+
             if success:
                 st.success(f"Lectura confirmada: **{plate}**")
             else:
