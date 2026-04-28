@@ -278,7 +278,8 @@ with col_input:
     uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
 
     if uploaded_file is not None:
-        image = Image.open(uploaded_file)
+        # Aquí está la magia: convierto la imagen a RGB pase lo que pase
+        image = Image.open(uploaded_file).convert('RGB')
         img_array = np.array(image)
         st.image(image, use_container_width=True, caption="Archivo cargado en memoria")
 
