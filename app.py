@@ -4,6 +4,7 @@ import numpy as np
 import easyocr
 from ultralytics import YOLO
 import re
+from PIL import Image
 import time
 
 # 1. Configuracion base de la pagina
@@ -204,7 +205,7 @@ def process_frame(img_np):
 
             vh, vw = vehicle_roi.shape[:2]
 
-            # Estrategia 1: zona inferior del vehiculo (donde suelen estar las matriculas)
+            # Estrategia 1: zona inferior del vehiculo
             bottom_crop = vehicle_roi[int(vh * 0.5):, :]
             if bottom_crop.size > 0:
                 versions = preprocess_plate_region(bottom_crop)
@@ -214,7 +215,7 @@ def process_frame(img_np):
                     best_conf = conf
                     best_box = (x1, y1, x2, y2)
 
-            # Estrategia 2: zona inferior-central (mas centrada en la placa)
+            # Estrategia 2: zona inferior-central
             center_x = vw // 2
             margin_x = int(vw * 0.35)
             center_crop = vehicle_roi[int(vh * 0.55):,
@@ -259,7 +260,7 @@ def process_frame(img_np):
 # 4. Estructura principal de la interfaz
 st.markdown('<div class="main-banner"><h1>Plataforma de extracción de datos</h1><p>Sistema inteligente de visión por computador para el reconocimiento automático de vehículos.</p></div>', unsafe_allow_html=True)
 
-# Panel de metricas (KPIs reales del benchmark)
+# Panel de metricas
 met1, met2, met3 = st.columns(3)
 met1.metric(label="Tasa de precision OCR", value="92.5%", delta="Validado en test")
 met2.metric(label="Tiempo de inferencia medio", value="895 ms", delta="Benchmark GPU", delta_color="off")
@@ -276,16 +277,15 @@ with col_input:
     uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
 
     if uploaded_file is not None:
-        # PASO CLAVE: Leemos los bytes puros y usamos OpenCV para decodificar. 
-        # El parámetro '1' fuerza a cargarla en BGR con 3 canales, eliminando transparencias.
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        img_bgr = cv2.imdecode(file_bytes, 1) 
+        # 1. Abro la imagen y la paso a RGB limpio
+        imagen_pil = Image.open(uploaded_file).convert('RGB')
         
-        # Convertimos una copia a RGB solo para que Streamlit pinte bien los colores
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        
-        # Le pasamos la matriz de números a Streamlit. ¡Cero errores!
-        st.image(img_rgb, use_container_width=True, caption="Archivo cargado en memoria")
+        # 2. Se la paso a Streamlit para que la enseñe sin quejarse
+        st.image(imagen_pil, use_container_width=True, caption="Archivo cargado en memoria")
+
+        # 3. La transformo a array y luego a BGR para que a OpenCV le guste
+        img_array_rgb = np.array(imagen_pil)
+        img_bgr = cv2.cvtColor(img_array_rgb, cv2.COLOR_RGB2BGR)
 
         run_button = st.button("Iniciar secuencia de analisis")
 
@@ -309,14 +309,14 @@ with col_output:
             status_text.text("Ejecutando lectura mediante redes neuronales recurrentes...")
             progress_bar.progress(85)
 
-            # Le pasamos a nuestra función la imagen en BGR, que es lo que espera OpenCV
-            res_img, plate, success = process_frame(img_bgr)
+            # 4. Uso el pipeline con la imagen BGR
+            res_img_bgr, plate, success = process_frame(img_bgr)
             progress_bar.progress(100)
             status_text.empty()
-            
-            # La imagen resultante de process_frame viene en BGR, la pasamos a RGB para mostrarla
-            res_img_rgb = cv2.cvtColor(res_img, cv2.COLOR_BGR2RGB)
-            st.image(res_img_rgb, use_container_width=True, caption="Capa de deteccion y segmentacion")
+
+            # 5. La devuelvo a RGB para que Streamlit me pinte bien los colorines
+            res_img_rgb_final = cv2.cvtColor(res_img_bgr, cv2.COLOR_BGR2RGB)
+            st.image(res_img_rgb_final, use_container_width=True, caption="Capa de deteccion y segmentacion")
 
             if success:
                 st.success(f"Lectura confirmada: **{plate}**")
