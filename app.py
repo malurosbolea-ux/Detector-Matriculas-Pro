@@ -5,6 +5,7 @@ import easyocr
 from ultralytics import YOLO
 import re
 import time
+import base64
 
 # 1. Configuracion base de la pagina
 st.set_page_config(
@@ -79,6 +80,23 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Funcion maestra para esquivar el bug de st.image
+def render_image_base64(img_bgr, caption):
+    """
+    Solucion antiaerea: me salto st.image() usando HTML puro y Base64.
+    Asi Streamlit no me toca la matriz y no me da el puto TypeError.
+    """
+    _, buffer = cv2.imencode('.jpg', img_bgr)
+    b64_str = base64.b64encode(buffer).decode()
+    html_code = f'''
+        <div style="text-align: center; margin-bottom: 1rem;">
+            <img src="data:image/jpeg;base64,{b64_str}" style="width: 100%; border-radius: 10px; border: 1px solid #F1F3F5;">
+            <p style="color: #7F8C8D; font-size: 0.9rem; margin-top: 8px; font-family: 'Inter', sans-serif;">{caption}</p>
+        </div>
+    '''
+    st.markdown(html_code, unsafe_allow_html=True)
+
+
 # 3. Logica de carga de modelos
 @st.cache_resource(show_spinner=False)
 def load_vision_models():
@@ -109,45 +127,30 @@ def clean_plate_text(text):
     return text.upper()
 
 def preprocess_plate_region(plate_img):
-    """
-    Genera multiples versiones preprocesadas de la zona de matricula.
-    Cada version optimiza para un tipo de condicion de imagen diferente.
-    """
     results = []
-
-    # Redimensionar a ancho estandar para que OCR trabaje mejor
     target_width = 400
     h, w = plate_img.shape[:2]
     if w > 0 and h > 0:
         scale = target_width / w
-        plate_img = cv2.resize(plate_img, (target_width, int(h * scale)),
-                               interpolation=cv2.INTER_CUBIC)
+        plate_img = cv2.resize(plate_img, (target_width, int(h * scale)), interpolation=cv2.INTER_CUBIC)
 
     gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
 
-    # Version 1: CLAHE (contraste adaptativo local)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
     results.append(enhanced)
 
-    # Version 2: CLAHE + binarizacion adaptativa (buena con iluminacion desigual)
-    binary = cv2.adaptiveThreshold(enhanced, 255,
-                                   cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                   cv2.THRESH_BINARY, 11, 2)
+    binary = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     results.append(binary)
 
-    # Version 3: Denoising + Otsu
     denoised = cv2.fastNlMeansDenoising(gray, h=10)
-    _, otsu = cv2.threshold(denoised, 0, 255,
-                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, otsu = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     results.append(otsu)
 
-    # Version 4: Sharpening
     kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
     sharpened = cv2.filter2D(gray, -1, kernel)
     results.append(sharpened)
 
-    # Version 5: CLAHE agresivo + denoising (para imagenes oscuras)
     clahe_strong = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4, 4))
     strong = clahe_strong.apply(gray)
     strong_denoised = cv2.fastNlMeansDenoising(strong, h=12)
@@ -155,12 +158,7 @@ def preprocess_plate_region(plate_img):
 
     return results
 
-
 def ocr_on_versions(versions, reader):
-    """
-    Ejecuta OCR sobre multiples versiones preprocesadas y devuelve
-    el mejor resultado (mayor confianza con al menos 4 caracteres).
-    """
     best_text = ""
     best_conf = 0.0
 
@@ -180,12 +178,7 @@ def ocr_on_versions(versions, reader):
 
     return best_text, best_conf
 
-
 def process_frame(img_np):
-    """
-    Pipeline completo: detecta vehiculos, recorta zonas de matricula,
-    aplica multiples preprocesados y extrae texto con OCR.
-    """
     results = model_vehicles(img_np, conf=0.25, verbose=False)
     best_plate = ""
     best_conf = 0.0
@@ -204,7 +197,6 @@ def process_frame(img_np):
 
             vh, vw = vehicle_roi.shape[:2]
 
-            # Estrategia 1: zona inferior del vehiculo
             bottom_crop = vehicle_roi[int(vh * 0.5):, :]
             if bottom_crop.size > 0:
                 versions = preprocess_plate_region(bottom_crop)
@@ -214,11 +206,9 @@ def process_frame(img_np):
                     best_conf = conf
                     best_box = (x1, y1, x2, y2)
 
-            # Estrategia 2: zona inferior-central
             center_x = vw // 2
             margin_x = int(vw * 0.35)
-            center_crop = vehicle_roi[int(vh * 0.55):,
-                                      max(0, center_x - margin_x):min(vw, center_x + margin_x)]
+            center_crop = vehicle_roi[int(vh * 0.55):, max(0, center_x - margin_x):min(vw, center_x + margin_x)]
             if center_crop.size > 0:
                 versions = preprocess_plate_region(center_crop)
                 text, conf = ocr_on_versions(versions, reader)
@@ -227,7 +217,6 @@ def process_frame(img_np):
                     best_conf = conf
                     best_box = (x1, y1, x2, y2)
 
-            # Estrategia 3: vehiculo completo como fallback
             versions = preprocess_plate_region(vehicle_roi)
             text, conf = ocr_on_versions(versions, reader)
             if conf > best_conf and len(text) >= 4:
@@ -235,7 +224,6 @@ def process_frame(img_np):
                 best_conf = conf
                 best_box = (x1, y1, x2, y2)
 
-    # Estrategia 4: si no detecta vehiculos, OCR directo sobre imagen completa
     if not best_plate:
         versions = preprocess_plate_region(img_np)
         text, conf = ocr_on_versions(versions, reader)
@@ -243,15 +231,13 @@ def process_frame(img_np):
             best_plate = text
             best_conf = conf
 
-    # Dibujar resultado en la imagen
     found = len(best_plate) >= 4
     if found and best_box is not None:
         bx1, by1, bx2, by2 = best_box
         cv2.rectangle(img_np, (bx1, by1), (bx2, by2), (181, 216, 235), 4)
         (tw, th), _ = cv2.getTextSize(best_plate, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
         cv2.rectangle(img_np, (bx1, by1 - th - 10), (bx1 + tw, by1), (0, 0, 0), -1)
-        cv2.putText(img_np, best_plate, (bx1, by1 - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (248, 209, 224), 3)
+        cv2.putText(img_np, best_plate, (bx1, by1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (248, 209, 224), 3)
 
     plate_text = best_plate if found else "Matricula ilegible"
     return img_np, plate_text, found
@@ -276,15 +262,12 @@ with col_input:
     uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
 
     if uploaded_file is not None:
-        # 1. Leemos los bytes puros del tirón. Cero conversiones raras de Numpy para que no pete.
-        image_bytes = uploaded_file.read()
-        
-        # 2. Le pasamos los bytes crudos directamente a Streamlit. ¡Cero intermediarios!
-        st.image(image_bytes, use_container_width=True, caption="Archivo cargado en memoria")
+        # Leo el archivo subido crudo para que OpenCV haga la magia
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        img_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-        # 3. Transformamos los bytes a la matriz BGR que necesita OpenCV
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Muestro la imagen usando mi funcion HTML para que Streamlit no pete
+        render_image_base64(img_bgr, "Archivo cargado en memoria")
 
         run_button = st.button("Iniciar secuencia de analisis")
 
@@ -308,17 +291,13 @@ with col_output:
             status_text.text("Ejecutando lectura mediante redes neuronales recurrentes...")
             progress_bar.progress(85)
 
-            # 4. Procesamos con OpenCV tranquilamente
+            # Analizo el frame
             res_img_bgr, plate, success = process_frame(img_bgr)
             progress_bar.progress(100)
             status_text.empty()
 
-            # 5. PASO CRITICO: Convertimos el resultado de OpenCV a bytes de JPEG.
-            # ¡Así Streamlit no toca la matriz Numpy y no nos da el maldito TypeError!
-            _, buffer = cv2.imencode('.jpg', res_img_bgr)
-            res_bytes = buffer.tobytes()
-            
-            st.image(res_bytes, use_container_width=True, caption="Capa de deteccion y segmentacion")
+            # Vuelvo a usar mi bypass HTML para enseñar el resultado pintado
+            render_image_base64(res_img_bgr, "Capa de deteccion y segmentacion")
 
             if success:
                 st.success(f"Lectura confirmada: **{plate}**")
